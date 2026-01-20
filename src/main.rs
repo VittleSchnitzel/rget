@@ -1,6 +1,10 @@
 extern crate clap;
 
 use clap::{Arg, App};
+use indicatif::{HumanBytes, ProgressBar, ProgressStyle};
+use console::{style};
+use reqwest::{Client, Url};
+use url::{ParseError};
 
 fn main() {
     let matches = App::new("rget")
@@ -22,7 +26,8 @@ fn create_progress_bar(quiet_mode: bool, msg: &str, length: Option<u64>) -> Prog
         true => ProgressBar::hidden(),
         false => {
             match length {
-                Some(len) => ProgressBar::new_spinner(),
+                Some(len) => ProgressBar::new(len),
+                None => ProgressBar::new_spinner(),
             }
         }
     };
@@ -31,21 +36,31 @@ fn create_progress_bar(quiet_mode: bool, msg: &str, length: Option<u64>) -> Prog
         true => bar
             .set_style(ProgressStyle::default_bar()
                 .template("{msg} {spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} eta: {eta}")
-                .progress_chars("=> ")),
+                .unwrap().progress_chars("=> ")),
         false => bar.set_style(ProgressStyle::default_spinner()),
     };
 
     bar
 }
 
-fn download(target: &str, quiet_mode: bool) -> Result<(), Box<::std::error::Error>> {
+pub fn parse_url(url: &str) -> Result<Url, ParseError> {
+    match Url::parse(url) {
+        Ok(url) => Ok(url),
+        Err(error) if error == ParseError::RelativeUrlWithoutBase => {
+            let url_with_base = format!("{}{}", "http://", url);
+            Url::parse(url_with_base.as_str())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn download(target: &str, quiet_mode: bool) -> Result<(), Box<dyn ::std::error::Error>> {
     //parse url
     let url = parse_url(target)?;
-    let client = Client::new().unwrap();
-    let mut resp = client.get(url)?
-        .send()
-        .unwrap();
-    print(format!("HTTP request sent... {}",
+    let client = Client::new();
+    let mut resp = client.get(url)
+        .send().await?;
+    print!("{} {}", format!("HTTP request sent... {}",
             style(format!("{}", resp.status())).green()),
         quiet_mode);
     if resp.status().is_success() {
@@ -57,21 +72,21 @@ fn download(target: &str, quiet_mode: bool) -> Result<(), Box<::std::error::Erro
 
         match ct_len {
             Some(len) => {
-                print(format!("Length: {} ({})",
+                print!("{} {}", format!("Length: {} ({})",
                     style(len).green(),
                     style(format!("{}", HumanBytes(len))).red()),
                     quiet_mode);
             },
             None => {
-                print(format!("Length: {}", style("unknown").red()), quiet_mode);
+                print!("{} {}", format!("Length: {}", style("unknown").red()), quiet_mode);
             },
         }
 
-        print(format!("Type: {}", style(ct_type).green()), quiet_mode);
+        print!("{} {}", format!("Type: {}", style(ct_type).green()), quiet_mode);
 
         let fname = target.split("/").last().unwrap();
 
-        print(format!("Saving to: {}", style(fname).green()), quiet_mode);
+        print!("{} {}", format!("Saving to: {}", style(fname).green()), quiet_mode);
 
         let chunk_size = match ct_len {
             Some(x) => x as usize / 99,
@@ -84,7 +99,7 @@ fn download(target: &str, quiet_mode: bool) -> Result<(), Box<::std::error::Erro
 
         loop {
             let mut buffer = vec![0; chunk_size];
-            let bcount = resp.read(&mut buffer[..]).unwrap();
+            let bcount = resp. //.read(&mut buffer[..]);
             buffer.truncate(bcount);
             if !buffer.is_empty() {
                 buf.extend(buffer.into_boxed_slice()
